@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Atrapa Estrellas — Juego simple</title>
+  <style>
+    :root{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
+    body{margin:0;background:linear-gradient(#081826,#0b2a33);color:#fff;display:flex;align-items:center;justify-content:center;height:100vh}
+    .game-wrap{width:720px;max-width:95vw;background:rgba(255,255,255,0.03);padding:12px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.6)}
+    canvas{display:block;background:linear-gradient(#04202a,#06333b);width:100%;height:420px;border-radius:8px}
+    .hud{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+    .hud .left{font-size:14px}
+    .hud .right{display:flex;gap:8px}
+    button{background:#0ca5a6;border:none;padding:8px 12px;border-radius:6px;color:#012;cursor:pointer;font-weight:600}
+    button:hover{filter:brightness(.95)}
+    .controls{font-size:13px;color:#bfe5e4}
+    .overlay{position:relative;margin-top:10px}
+    .message{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;pointer-events:none}
+    .panel{background:rgba(2,8,15,0.7);padding:14px 18px;border-radius:8px;text-align:center;backdrop-filter:blur(4px)}
+    .panel h2{margin:0 0 8px;font-size:20px}
+    .panel p{margin:0 0 12px;color:#cde}
+    .panel button{pointer-events:auto}
+    footer{margin-top:10px;font-size:12px;color:#9fc}
+  </style>
+</head>
+<body>
+  <div class="game-wrap">
+    <canvas id="game" width="720" height="420"></canvas>
+
+    <div class="hud">
+      <div class="left">
+        Puntuación: <strong id="score">0</strong>
+        &nbsp; • &nbsp;
+        Vidas: <strong id="lives">3</strong>
+      </div>
+      <div class="right">
+        <div class="controls">Mover: ← → o A D — Pausa: Espacio</div>
+        <button id="restart">Reiniciar</button>
+      </div>
+    </div>
+
+    <div class="overlay">
+      <div class="message" id="message">
+        <div class="panel" id="panel-start">
+          <h2>Atrapa Estrellas</h2>
+          <p>Mueve la nave abajo para atrapar las estrellas. Evita las rocas.</p>
+          <button id="start">Jugar</button>
+        </div>
+      </div>
+    </div>
+
+    <footer>Juego simple en un solo archivo — Puedes abrirlo como <em>index.html</em></footer>
+  </div>
+
+<script>
+/* Juego "Atrapa Estrellas" - Autor: ChatGPT
+   Regla simple: controla la nave en la parte inferior, atrapa estrellas (+1)
+   Evita rocas (-1 vida). La velocidad aumenta con la puntuación. */
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
+const message = document.getElementById('message');
+const panelStart = document.getElementById('panel-start');
+const startBtn = document.getElementById('start');
+const restartBtn = document.getElementById('restart');
+
+let W = canvas.width, H = canvas.height;
+let keys = {};
+let game;
+
+function rand(min,max){return Math.random()*(max-min)+min}
+
+class Player{
+  constructor(){
+    this.w = 80; this.h = 16;
+    this.x = (W-this.w)/2; this.y = H - this.h - 10;
+    this.speed = 6;
+  }
+  update(){
+    if(keys['ArrowLeft']||keys['a']) this.x -= this.speed;
+    if(keys['ArrowRight']||keys['d']) this.x += this.speed;
+    this.x = Math.max(0,Math.min(W-this.w,this.x));
+  }
+  draw(){
+    ctx.fillStyle = '#89f7ff';
+    ctx.fillRect(this.x,this.y,this.w,this.h);
+    // antena
+    ctx.fillRect(this.x+this.w/2-4,this.y-10,8,10);
+    ctx.beginPath(); ctx.arc(this.x+this.w/2,this.y-12,3,0,Math.PI*2); ctx.fill();
+  }
+}
+
+class Item{
+  constructor(type){
+    this.type = type; // 'star' or 'rock'
+    this.x = rand(20,W-20);
+    this.y = -20;
+    this.r = (type==='star')?12:16;
+    this.speed = rand(1.2,2.2);
+  }
+  update(delta){
+    this.y += this.speed + game.speedFactor;
+  }
+  draw(){
+    if(this.type==='star') drawStar(this.x,this.y,this.r);
+    else drawRock(this.x,this.y,this.r);
+  }
+}
+
+function drawStar(x,y,r){
+  ctx.save(); ctx.translate(x,y);
+  ctx.beginPath();
+  for(let i=0;i<5;i++){
+    ctx.lineTo(0, -r);
+    ctx.rotate(Math.PI/5);
+    ctx.lineTo(0, -r/2);
+    ctx.rotate(Math.PI/5);
+  }
+  ctx.fillStyle='#ffd166'; ctx.fill();
+  ctx.restore();
+}
+function drawRock(x,y,r){
+  ctx.beginPath(); ctx.ellipse(x,y,r*1.1,r,0,0,Math.PI*2);
+  ctx.fillStyle = '#6b6b6b'; ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,0.4)'; ctx.stroke();
+}
+
+function intersectsRectCircle(rx,ry,rw,rh,cx,cy,cr){
+  // closest point
+  let closestX = Math.max(rx,Math.min(cx,rx+rw));
+  let closestY = Math.max(ry,Math.min(cy,ry+rh));
+  let dx = cx-closestX, dy = cy-closestY;
+  return (dx*dx+dy*dy) < (cr*cr);
+}
+
+function resetGame(){
+  game = {
+    player: new Player(),
+    items: [],
+    lastSpawn: 0,
+    spawnInterval: 900,
+    score: 0,
+    lives: 3,
+    speedFactor: 0,
+    running: false,
+    paused: false,
+    lastTime: 0
+  };
+  updateHUD();
+}
+
+function updateHUD(){
+  scoreEl.textContent = game.score;
+  livesEl.textContent = game.lives;
+}
+
+function spawnItem(){
+  // probabilidades: 70% estrella, 30% roca
+  let t = Math.random() < 0.7 ? 'star' : 'rock';
+  game.items.push(new Item(t));
+}
+
+function gameLoop(ts){
+  if(!game.running) return;
+  if(!game.lastTime) game.lastTime = ts;
+  let dt = ts - game.lastTime;
+  game.lastTime = ts;
+  if(game.paused){ requestAnimationFrame(gameLoop); return; }
+
+  // spawn
+  game.lastSpawn += dt;
+  if(game.lastSpawn > game.spawnInterval){ game.lastSpawn = 0; spawnItem(); }
+
+  // increase difficulty slightly with score
+  game.speedFactor = Math.min(3, game.score * 0.02);
+
+  // update
+  game.player.update();
+  for(let it of game.items) it.update(dt);
+
+  // collisions & bounds
+  for(let i = game.items.length-1; i>=0; i--){
+    let it = game.items[i];
+    if(it.y - it.r > H){ // fell off screen
+      game.items.splice(i,1);
+      if(it.type === 'star'){
+        game.lives -= 1; // miss a star -> lose life
+        if(game.lives <= 0) endGame();
+        updateHUD();
+      }
+      continue;
+    }
+    if(intersectsRectCircle(game.player.x, game.player.y, game.player.w, game.player.h, it.x, it.y, it.r)){
+      // collision
+      if(it.type === 'star'){
+        game.score += 1;
+        // small speed up and faster spawn
+        game.spawnInterval = Math.max(350, game.spawnInterval - 6);
+      } else {
+        game.lives -= 1;
+        if(game.lives <= 0) endGame();
+      }
+      game.items.splice(i,1);
+      updateHUD();
+    }
+  }
+
+  // render
+  ctx.clearRect(0,0,W,H);
+  // background stars
+  for(let i=0;i<40;i++){
+    ctx.fillStyle='rgba(255,255,255,0.03)'; ctx.fillRect((i*53)%W, (i*29+ (ts*0.01)%H) % H, 2,2);
+  }
+  game.player.draw();
+  for(let it of game.items) it.draw();
+
+  // footer text
+  ctx.fillStyle='rgba(200,255,255,0.08)'; ctx.font='12px sans-serif';
+  ctx.fillText('Velocidad: '+(game.speedFactor.toFixed(2)), 10, H-6);
+
+  requestAnimationFrame(gameLoop);
+}
+
+function startGame(){
+  message.style.pointerEvents = 'none';
+  panelStart.style.display = 'none';
+  game.running = true;
+  game.paused = false;
+  game.lastTime = 0;
+  requestAnimationFrame(gameLoop);
+}
+
+function endGame(){
+  game.running = false;
+  panelStart.style.display = 'block';
+  panelStart.innerHTML = `<h2>Juego terminado</h2><p>Puntuación: ${game.score}</p><button id="start">Jugar otra vez</button>`;
+  document.getElementById('start').addEventListener('click', ()=>{
+    resetGame(); startGame();
+  });
+}
+
+// input
+window.addEventListener('keydown', e=>{
+  if(e.key===' '){
+    if(game.running) { game.paused = !game.paused; panelStart.style.display = game.paused ? 'block' : 'none'; panelStart.innerHTML = game.paused ? '<h2>Pausado</h2><p>Pulsa Espacio para continuar</p>' : '' }
+    e.preventDefault();
+  }
+  keys[e.key] = true;
+});
+window.addEventListener('keyup', e=>{ keys[e.key] = false; });
+
+// buttons
+startBtn.addEventListener('click', ()=>{ resetGame(); startGame(); });
+restartBtn.addEventListener('click', ()=>{ resetGame(); startGame(); });
+
+// responsive resize
+window.addEventListener('resize', ()=>{
+  // We keep canvas internal resolution fixed to avoid complexity, but scale with CSS
+});
+
+// initial
+resetGame();
+</script>
+</body>
+</html>
